@@ -5,4 +5,5 @@ Skupimy się analizie danych z Kaggle'a:\
 (https://www.kaggle.com/datasets/uom190346a/sleep-health-and-lifestyle-dataset?resource=download).
 
 Sformuujemy trzy hipotezy, które następnie będziemy badać. \
-Praca powstała na przedmiocie 'Wnioskowanie statystyczne' we współpracy z Łukaszem Bielawskim.
+Praca powstała na przedmiocie 'Wnioskowanie statystyczne' we współpracy z Łukaszem Bielawskim.\
+Została ona napisana w R Markdown, gdzie stworzyliśmy finalny pdf: Sleep_health_lifestyle_project.
