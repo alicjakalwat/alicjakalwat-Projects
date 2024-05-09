@@ -1,0 +1,595 @@
+---
+title: "| \\vspace{7cm} \\LARGE Analiza szeregów czasowych - Projekt zaliczeniowy
+  \n"
+author: "Alicja Kalwat  \n Modelowanie Matematyczne i Analiza Danych,  \n Uniwersytet
+  Gdański"
+date: "20.01.2024r."
+output:
+  pdf_document:
+    latex_engine: pdflatex
+    keep_tex: true
+    dev: "cairo_pdf"
+    includes:
+      in_header: header.tex
+---
+
+
+\newpage
+
+# Wstęp
+
+Projekt prezentuje analizę danych miesięcznych (dane nr 12), skupiając się na ocenie stacjonarności szeregu, zastosowaniu przekształceń, modelowaniu AR(p), MA(q) oraz dopasowaniu modelu SARIMA. Diagnostyka obejmuje ocenę reszt oraz dopasowania i precyzji prognoz. Ostatecznie wybrany zostanie model, który najlepiej pasuje do analizowanych danych. Analiza przeprowadzona będzie na zbiorze treningowym, a zbiór testowy (ostatnie 10% danych) wykorzystany zostanie do oceny prognoz.
+
+
+
+```{r include=FALSE}
+
+library(forecast)
+library(tseries)
+library(ggplot2)
+
+dane <- read.csv("dane12.csv")
+dane <- dane[,2]
+dane <- ts(dane, end = c(2023, 12), frequency = 12)
+
+train <- head(dane, round(length(dane) * 0.9))
+test <- tail(dane, length(dane) - length(train))
+```
+
+
+# 1. Ocena stacjonarności szeregu
+
+Pierwszym krokiem w analizie szeregu czasowego jest ocena stacjonarności. Cechą, którą możemy zobaczyć już na wykresie szeregu jest sezonowość, która w tym przypadku ma okres dwumiesięczny. Oznacza to, że podobne wartości powtarzają się co dwa miesiące. Świadczy to o braku stacjonarności szeregu. 
+
+$$\\[0.3in]$$
+
+```{r echo=FALSE, fig.height = 6, fig.width = 8, fig.align = 'center'}
+
+plot(train, ylab = "Values", xlab = "Time", main = "Wykres szeregu czasowego: grudzień 2003 - grudzień 2021")
+
+```
+
+
+\newpage
+
+
+Gdy dane są sezonowe, wtedy warto stworzyć wykresy *seasonplot* oraz *monthplot*. Przyjrzyjmy się w takim razie, jak wyglądają dane podzielone na miesiące - bardzo dobrze widać tutaj opisaną wcześniej sezonowość. 
+
+```{r echo=FALSE, fig.height = 4, fig.width = 7, fig.align = 'center'}
+
+monthplot(train, main="Wykres miesięczny", ylab = "Values", xlab = "Month") 
+seasonplot(train, year.labels = T,col=rainbow(5),main="Wykres sezonowy", ylab = "Values")
+
+```
+
+
+\newpage
+
+
+Drugą cechą, która świadczy o niestacjonarności szeregu, jest obecność trendu. Na pierwszy rzut oka ciężko stwierdzić, czy jest obecny w tym szeregu. W takim razie dodajmy do niego linię regresji. 
+
+$$\\$$
+
+```{r echo=FALSE, fig.align = 'center', fig.height = 4, fig.width = 6}
+df <- data.frame(Date = time(train), Value = as.numeric(train))
+
+ggplot(df, aes(x = Date, y = Value)) +
+  theme(plot.title = element_text(hjust = 0.5, face = 'bold', margin = margin(b = 20))) +
+  geom_line() +
+  geom_smooth(method = "lm", se = FALSE, formula = 'y ~ x') +
+  scale_x_continuous() + 
+  scale_y_continuous() + 
+  ggtitle("Szereg czasowy z linią regresji")
+
+#lm(train ~ time(train)) -> regr.train
+#summary(regr.train)  
+
+```
+
+$$\\$$
+
+Patrząc na wykres możemy ocenić, że trend, mimo, że niewielki, to jest obecny. Tworząc model regresji liniowej otrzymujemy w podsumowaniu p-value =  0.01845, co również wskazuje na obecność trendu. 
+
+
+Potwierdza to przypuszczenie, że szereg jest niestacjonarny. Aby upewnić się, że tak faktycznie jest, możemy skorzystać z dwóch testów sprawdzających stacjonarność:
+
+- *adf.test* (Augmented Dickey-Fuller Test) - hipoteza zerowa: szereg niestacjonarny,
+- *kpss.test* (Kwiatkowski–Phillips–Schmidt–Shin) - hipoteza zerowa: szereg stacjonarny.
+
+```{r include=FALSE}
+adf.test(train) 
+kpss.test(train) 
+```
+
+W teście ADF otrzymujemy p-value = 0.2512 (zostawiamy hipotezę zerową), natomiast w KPSS: 
+p-value = 0.01 (odrzucamy hipotezę zerową). Obie te wartości wskazują na to, że nie jest to szereg stacjonarny.
+
+
+\newpage
+
+# 2. Przekształcanie na szereg stacjonarny
+
+```{r include=FALSE}
+ndiffs(train)
+nsdiffs(train)
+```
+
+
+Do dalszej analizy potrzebujemy danych, które są stacjonarne. Zastosujemy więc odpowiednie przekształcenia, aby takie dane uzyskać. Skorzystamy z metody różnicowania. Sprawdzając, jaki jest automatyczny wybór rzędu różnicowania (*ndiffs, nsdiffs*) dostajemy w obu przypadkach wynik 1. Oznacza to, że mamy różnicować raz, by pozbyć się trendu i raz, by pozbyć się sezonowości. Zgadza się to z naszymi wcześniejszymi obserwacjami. Tak więc robimy. W przypadku sezonowości ustawimy opóznienie = 2.
+
+```{r echo=FALSE, fig.height = 4.5, fig.width = 8, fig.align = 'center'}
+
+train_diff_trend <- diff(train)
+train_diff_seasonal <- diff(train_diff_trend, lag = 2)
+train.stac <- train_diff_seasonal
+
+plot(train.stac, main = "Ostateczny szereg czasowy po zastosowaniu różnicowań", ylab = "Values")
+```
+
+
+Teraz szereg wygląda na stacjonarny. Upewnijmy się, że nie ma już sezonowości, patrząc po raz kolejny na wykresy *seasonplot* oraz *monthplot*:
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6, fig.align = 'center'}
+monthplot(train.stac,main="Wykres miesięczny", ylab = "Values", xlab = "Month") 
+seasonplot(train.stac,year.labels = T,col=rainbow(5),main="Wykres sezonowy", ylab = "Values")
+```
+
+Nie widać sezonowości. Co więcej, na wykresie miesięcznym widać, że średnie wartości w każdym miesiącu zbliżyły się do zera. Zobaczmy teraz, czy zniknął również trend.
+
+```{r echo=FALSE, fig.align = 'center', fig.height = 4, fig.width = 6}
+df2 <- data.frame(Date = time(train.stac), Value = as.numeric(train.stac))
+
+ggplot(df2, aes(x = Date, y = Value)) +
+  theme(plot.title = element_text(hjust = 0.5, face = 'bold', margin = margin(b = 20))) +
+  geom_line() +
+  geom_smooth(method = "lm", se = FALSE, formula = 'y ~ x') +
+  scale_x_continuous() + 
+  scale_y_continuous() + 
+  ggtitle("Szereg czasowy z linią regresji (po różnicowaniu)")
+
+#lm(train.stac ~ time(train.stac)) -> regr.train.stac
+#summary(regr.train.stac)  
+
+```
+
+```{r include=FALSE}
+adf.test(train.stac) 
+```
+
+
+Trend zniknął (teraz w modelu regresji liniowej p-value = 0.9123). W takim razie nie ma już ani trendu, ani sezonowości. Wykonując dla sprawdzenia test ADF (H0: szereg niestacjonarny) dostajemy p-value = 0.01. Zatem możemy uznać te dane za stacjonarne.
+
+
+\newpage
+
+# 3. Dopasowanie modelu szeregu AR(p) oraz szeregu MA(q).
+
+Do danych stacjonarnych możemy dopasować modele szeregu autoregresji oraz szeregu średniej kroczącej.
+Zajmijmy się najpierw średnią kroczącą - MA(q). Aby dobrać odpowiednie *q* spójrzmy na wykres autokorelacji.
+
+$$\\$$
+
+```{r echo=FALSE, fig.height = 4, fig.width = 7, fig.align = 'center'}
+acf(train.stac, lag.max = 6*12, main = "Wykres funkcji autokorelacji")
+```
+
+$$\\$$
+
+Potrzebujemy znaleźć takie *q*, żeby silna korelacja była obecna tylko na opóźnieniach do  *q*. Następne wartości powinny być bliskie zeru (albo przynajmniej znajdować się wewnątrz akceptowalnego przedziału).
+
+Tutaj najbezpieczniejszym wyborem wydaje się być *q* = 44, bo w tym miejscu jest ostatnia znacząca korelacja. Jednak jest to bardzo duża liczba, więc warte zastanowienia może być też, trochę mniejsze, *q* = 20. 
+
+Jest to ostatnia znacząca wartość, po której długo nie ma żadnych wystających poza dopuszczalny przedział słupków. Jest ich potem jeszcze kilka, jednak mieszczą się one w 5%, które mogą poza ten przedział wychodzić. W naszym przypadku 5% długości całego szeregu czasowego to około 11 wartości. Co prawda nie są to duże przekroczenia i kusiłoby wzięcie mniejszego *q*, jednak należy pamiętać, że nasz model musi spełnić wspomniane wcześniej założenie.
+
+Mając to na uwadze, do dalszej analizy użyjemy wcześniej wybraną wartość *q* = 20, czyli będzie to model średniej kroczącej rzędu 20.
+
+```{r include=FALSE}
+0.05 * length(train.stac)
+```
+
+
+\newpage
+
+Aby dobrać model szeregu autoregresji - AR(p), przyjrzyjmy się wykresowi częściowej autokorelacji.
+
+```{r echo=FALSE, fig.height = 4, fig.width = 7, fig.align = 'center'}
+pacf(train.stac, lag.max = 5*12, main = "Wykres funkcji częściowej autokorelacji")
+```
+
+W tym przypadku parametr *p* również ma być ostatnim, dla którego obecna będzie znaczna korelacja. Dobrym kandydatem wydaje się tu być *p* = 21. Jest to bezpieczny wybór, bo jest to ostatni słupek wystający poza przedział (nie licząc późniejszych pojedynczych wartości mieszczących się w 5%).
+
+Jako pomoc w doborze *p* możemy zastosować funkcję *ar.aic*, która za pomocą kryterium AIC wybiera najlepsze *p*, oraz wykres wartości kryterium AIC dla różnych *p*. Funkcja *ar.aic* w naszym przypadku wybrała *p* = 9. Na wykresie widać, że ma ona najniższą wartość AIC, jednak jest ona bardzo zbliżona do tej dla *p* = 21. Po ocenie wykresu PACF decydujemy się więc na pozostanie przy AR(21).
+
+```{r echo=FALSE, fig.height = 3.1, fig.width = 5, fig.align = 'center'}
+ar.aic<-ar(train.stac,aic=T) 
+
+aic.vs.p<-ar.aic$aic # Kryterium AIC dla różnych rzędów p
+par(mar = c(5, 4, 2, 2))
+plot(as.numeric(names(aic.vs.p)),aic.vs.p, xlab="rząd modelu autoregresji (p)",
+     ylab="Kryterium AIC", type="b")
+grid() 
+
+
+```
+
+
+Podsumowując: dla naszego szeregu stacjonarnego dopasowaliśmy dwa modele: 
+
+- szereg autoregresji AR(21),
+- szereg średniej kroczącej MA(20).
+
+
+# 4. Dopasowanie modeli SARIMA.
+
+Modele można dopasowywać także do danych niestacjonarnych. Spróbujmy więc dopasować model SARIMA do naszych oryginalnych danych (treningowych). Będzie to model złożony z części autoregresyjnej, kroczącej średniej, a także uwzględniający trend i sezonowość. Na początek zastosujmy funkcję *auto.arima*, która automatycznie wybiera model SARIMA za pomocą kryteriów AIC, AICC lub BIC. 
+
+Wszystkie kryteria proponują wybór ARIMA(2,0,1)(2,1,0)[12].
+
+
+Dziwny wydaje się jednak być okres sezonowości równy 12, skoro na wykresie było wyraźnie widać okres co dwa miesiące.
+Kolejną zastanawiającą rzeczą jest brak różnicowania w celu niwelacji trendu. Stworzymy więc drugi "ulepszony" model: ARIMA(2,1,1)(2,1,0)[2] - w którym zmienimy okres sezonowości na 2, oraz dodamy różnicowanie *d* = 1.
+
+
+```{r include=FALSE}
+arima.auto <- Arima(train, order = c(2, 0, 1), seasonal = list(order = c(2, 1, 0), period = 12))
+arima.auto.2 <- Arima(train, order = c(2, 1, 1), seasonal = list(order = c(2, 1, 0), period = 2))
+```
+
+
+
+# 5. Diagnostyka modeli: ocena jakości dopasowania i prognoz.
+
+Mamy już przygotowane modele dla danych stacjonarnych oraz dla danych początkowych. Wykonamy teraz ich diagnostykę, tj: sprawdzimy, czy reszty są losowe i normalne, wyliczymy wartości kryteriów informacyjnych, a na koniec wyliczymy miary błędu prognoz, by ocenić ich jakość.
+
+## Dane stacjonarne
+
+Jako pierwszymi zajmiemy się danymi stacjonarnymi. Na wykresach widać funkcję autokorelacji dla obu modeli - wyglądają poprawnie, nie widać żadnych znaczących korelacji między opóźnieniami.
+
+
+```{r echo=FALSE, fig.height = 4.5, fig.width = 9, fig.align = 'center'}
+
+par(mfrow = c(1, 2))
+
+ar.21 <- Arima(train.stac, order = c(21, 0, 0))
+ma.20 <- Arima(train.stac, order = c(0, 0, 20))
+
+
+reszty.ar.21 <- ar.21$residuals
+reszty.ma.20 <- ma.20$residuals
+
+acf(na.omit(reszty.ar.21), lag.max = 10*12, main = "Wykres autokorelacji AR(21)")
+acf(na.omit(reszty.ma.20), lag.max = 10*12, main = "Wykres autokorelacji MA(20)")
+
+#pacf(na.omit(reszty.ar.21), lag.max = 10*12, main = "Wykres częściowej autokorelacji AR(21)")
+#pacf(na.omit(reszty.ma.20), lag.max = 10*12, main = "Wykres częściowej autokorelacji MA(20)")
+```
+
+Losowość reszt można też sprawdzić za pomocą testu Boxa - Ljunga. W tym teście hipoteza zerowa mówi, że reszty są losowe. Patrząc poniżej na p-value reszt obydwu modeli zdecydowanie zostawiamy tę hipotezę.
+
+
+\noindent\hrulefill
+
+\begin{center} 
+
+- p-value testu Boxa-Ljunga dla AR(21): 0.99
+
+- p-value testu Boxa-Ljunga dla MA(20): 0.98
+
+\end{center}
+
+\noindent\hrulefill
+
+
+$$\\$$
+Następnie możemy ocenić normalność reszt używając testu Shapiro-Wilka. Hipoteza zerowa mówi o pochodzeniu danych z rozkładu normalnego, więc stwierdzamy, że nasze reszty są normalne.
+
+
+\noindent\hrulefill
+
+\begin{center} 
+
+- p-value testu Shapiro - Wilka dla AR(21): 0.3645
+
+- p-value testu Shapiro - Wilka dla MA(20): 0.2144
+
+\end{center}
+
+\noindent\hrulefill
+
+
+$$\\$$
+
+Teraz porównajmy wartości kryteriów informacyjnych: AIC, AICc oraz BIC dla tych modeli. Im mniejsze wartości kryteriów, tym lepiej. Patrząc na wartości są one porównywalne dla obydwu z nich.
+
+
+\noindent\hrulefill
+
+
+\begin{center} 
+
+- AR(21): AIC = 637.06   AICc = 642.87   BIC = 714.48 
+
+- MA(20): AIC = 637.83   AICc = 643.13   BIC = 711.88 
+
+
+\end{center}
+
+\noindent\hrulefill
+
+
+
+```{r include=FALSE}
+
+Box.test(reszty.ar.21, lag=20,type="Ljung-Box")
+Box.test(reszty.ma.20, lag=20,type="Ljung-Box")
+
+```
+
+$$\\$$
+
+
+Następnym krokiem w diagnostyce jest sprawdzenie dokładności prognoz, porównamy wartości miar błędów: RMSE (Root Mean Squared Error), MAE (Mean Absolute Error), MAPE (Mean Absolute Percentage Error) oraz MASE (Mean Absolute Scaled Error) - im będą mniejsze, tym lepiej. Tutaj również wartości są porównywalne, jednak niepokojący wydaje się być wysoki wynik MAPE. Wyższa wartość MAPE oznacza większy procentowy błąd prognozy, co może oznaczać, że prognozy są niestabilne.
+
+\noindent\hrulefill
+
+\begin{center} 
+
+- AR(21): RMSE= 0.95, MAE = 0.78, MAPE = 281.46, MASE = 0.46
+
+- MA(20): RMSE = 0.94, MAE = 0.74, MAPE = 334.52, MASE = 0.44
+
+\end{center}
+
+\noindent\hrulefill
+
+
+
+```{r include=FALSE}
+summary(ar.21)  
+summary(ma.20) 
+```
+
+## Dane oryginalne
+
+Teraz zajmiemy się danymi oryginalnymi, czyli niestacjonarnymi.Na poniższych wykresach widać funkcję autokorelacji dla dwóch modeli SARIMA. Dla pierwszego modelu możemy zaobserwować znacznie więcej wartości wystających poza dozwolony przedział.
+
+
+```{r echo=FALSE, fig.height = 6, fig.width = 6, fig.align = 'center'}
+
+par(mfrow = c(2, 1))
+
+reszty.arima.auto <-arima.auto$residuals
+reszty.arima.auto.2 <-arima.auto.2$residuals
+
+acf(na.omit(reszty.arima.auto), lag.max = 10*12, main = "ARIMA(2,0,1)(2,1,0)[12]")
+acf(na.omit(reszty.arima.auto.2), lag.max = 10*12, main = "ARIMA(2,1,1)(2,1,0)[2]")
+
+#pacf(na.omit(reszty.arima.auto), lag.max = 10*12, main = "Wykres PACF ARIMA(2,0,1)(2,1,0)[12]")
+#pacf(na.omit(reszty.arima.auto.2), lag.max = 10*12, main = "Wykres PACF ARIMA(2,1,1)(2,1,0)[2]")
+     
+```
+
+
+
+Sprawdźmy teraz losowość reszt testem Boxa-Ljunga - okazuje się, że pierwszy model nie ma losowych reszt, ale drugi już tak. Losowość reszt jest bardzo ważnym założeniem w trakcie tworzenia modelu i powinna zostać spełniona, więc model ARIMA(2,0,1)(2,1,0)[12] najprawdopodobniej będzie musiał zostać odrzucony.
+
+
+\noindent\hrulefill
+
+\begin{center} 
+
+- p-value testu Boxa-Ljunga dla ARIMA(2,0,1)(2,1,0)[12]: 0.0095
+
+- p-value testu Boxa-Ljunga dla ARIMA(2,1,1)(2,1,0)[2]:  0.2709
+
+\end{center}
+
+\noindent\hrulefill
+
+
+Oceńmy normalność reszt. Normalność reszt jest założeniem, które warto by było, aby było spełnione przez model. Tutaj znacznie lepiej wygląda drugi model. P-value dla pierwszego modelu jest mniejszy niż 5%, przez co możemy stwierdzić, że nie ma on reszt o rozkładzie normalnym.
+
+
+\noindent\hrulefill
+
+\begin{center} 
+
+- p-value testu Shapiro - Wilka dla ARIMA(2,0,1)(2,1,0)[12]: 0.0229
+
+- p-value testu Shapiro - Wilka dla ARIMA(2,1,1)(2,1,0)[2]: 0.4304
+
+
+\end{center}
+
+\noindent\hrulefill
+
+
+
+$$\\$$
+
+Sprawdźmy wartości kryteriów informacyjnych dla tych model - W tym zestawieniu lepszy wydaje się model ARIMA(2,1,1)(2,1,0)[2], bo ma mniejsze wartości kryteriów.
+
+
+\noindent\hrulefill
+
+\begin{center} 
+
+- ARIMA(2,0,1)(2,1,0)[12]:  AIC=652.29   AICc=652.71   BIC=672.22
+
+- ARIMA(2,1,1)(2,1,0)[2]:   AIC=632.23   AICc=632.64   BIC=652.43
+
+\end{center}
+
+\noindent\hrulefill
+
+
+```{r include=FALSE}
+arima.auto
+arima.auto.2
+```
+
+$$\\$$
+Ostatnim krokiem będzie porównywanie wartości miar błędów prognoz. Różnią się one nieznacznie, nieco mniejsze są dla modelu ARIMA(2,1,1)(2,1,0)[2]. Tutaj MAPE jest dużo mniejsze niż w przypadku modeli dla danych stacjonarnych, co wskazuje na lepsze dopasowanie.
+
+\noindent\hrulefill
+
+\begin{center} 
+
+- ARIMA(2,0,1)(2,1,0)[12]: RMSE = 1.10, MAE = 0.82, MAPE = 24.32, MASE = 0.43
+
+- ARIMA(2,1,1)(2,1,0)[2]:  RMSE = 1.01, MAE = 0.81, MAPE = 26.20, MASE = 0.42
+
+
+\end{center}
+
+\noindent\hrulefill
+
+
+
+```{r include=FALSE}
+summary(arima.auto)  
+summary(arima.auto.2) 
+```
+
+$$\\$$
+
+# 6. Wyznaczanie oraz ocena prognoz
+
+Możemy teraz przystąpić do tworzenia prognoz. Wykonamy je za pomocą funkcji *forecast*. Zbiór testowy ma długość 24, więc na tyle miesięcy wyznaczymy prognozę - od stycznia 2022, do grudnia 2023 roku. Zacznijmy od modeli SARIMA i danych niestacjonarnych.
+
+
+\newpage
+
+**Model ARIMA(2,0,1)(2,1,0)[12]**
+
+Model dobrze poradził sobie z prognozowaniem w pierwszych miesiącach, potem jednak wartości zaczęły się trochę "rozjeżdzać". Niemniej jednak została zachowana obecna sezonowość.
+
+
+```{r echo=FALSE, fig.height = 5, fig.width = 9, fig.align = 'center'}
+
+forecast.auto <- forecast(arima.auto, length(test))
+
+plot(forecast.auto, ylab = "Values")
+lines(test, col = 2, lwd = 1)
+
+plot(forecast.auto, include = 0, xaxt = 'n', ylab = "Values")
+lines(test, col = 2, lwd = 1)
+points(test, col = "2", pch = 19)
+axis(1, at = seq(2022, 2024, by = 0.5), labels = c("Jan 2022", "Jun 2022", "Jan 2023", "Jun 2023", "Jan 2024"))
+
+```
+
+
+\newpage
+
+**Model ARIMA(2,1,1)(2,1,0)[2]**
+
+Ta prognoza jest bardzo podobna, pierwsze miesiące przewidziane są niemal idealnie, dopiero później sytuacja się pogarsza. Mimo, że prognozy wyglądają podobnie, należy pamiętać o wynikach diagnostyki obu modeli. Model drugi (ARIMA(2,1,1)(2,1,0)[2]) miał lepsze wyniki, więc on będzie lepszym wyborem.
+
+
+
+```{r echo=FALSE, fig.height = 5, fig.width = 9, fig.align = 'center'}
+
+forecast.auto.2 <- forecast(arima.auto.2, length(test))
+
+plot(forecast.auto.2, ylab = "Values")
+lines(test, col = 2, lwd = 1)
+
+plot(forecast.auto.2, include = 0, xaxt = 'n', ylab = "Values")
+lines(test, col = 2, lwd = 1)
+points(test, col = "2", pch = 19)
+axis(1, at = seq(2022, 2024, by = 0.5), labels = c("Jan 2022", "Jun 2022", "Jan 2023", "Jun 2023", "Jan 2024"))
+
+```
+
+
+
+\newpage
+
+Wyznaczmy teraz prognozy na danych stacjonarnych.
+
+**Model AR(21)**
+
+Tutaj, z racji stacjonarności szeregu wartości są bardziej chaotyczne. Mimo to, model poradził sobie z przewidzeniem niektórych wartości, a znaczna większość znajduje się w przedziale ufności owych prognoz.
+
+
+```{r echo=FALSE, fig.height = 5, fig.width = 9, fig.align = 'center'}
+
+test.2 <- tail(dane, length(dane) - length(train) + 3)
+test.stac <- diff(diff(test.2, lag = 2))
+
+
+forecast.ar.21 <- forecast(ar.21, length(test.stac))
+
+
+plot(forecast.ar.21, ylab = "Values")
+lines(test.stac, col = 2, lwd = 1)
+
+
+plot(forecast.ar.21, include = 0, xaxt = 'n', ylab = "Values")
+lines(test.stac, col = 2, lwd = 1)
+points(test.stac, col = "2", pch = 19)
+axis(1, at = seq(2022, 2024, by = 0.5), labels = c("Jan 2022", "Jun 2022", "Jan 2023", "Jun 2023", "Jan 2024"))
+
+```
+
+**Model MA(20)**
+
+W tym przypadku prognozy również są do siebie zbliżone. W tym modelu, podobnie jak w AR(21) niektóre wartości udało się przewidzieć, a niektóre wystają lekko poza przedział ufności. Patrząc na ostatnie miesiące lepiej poradził sobie AR(21), więc on może okazać się być nieco lepszy niż MA(20).
+
+
+
+```{r echo=FALSE, fig.height = 5, fig.width = 9, fig.align = 'center'}
+
+forecast.ma.20 <- forecast(ma.20, length(test.stac))
+
+plot(forecast.ma.20, ylab = "Values")
+lines(test.stac, col = 2, lwd = 1)
+
+plot(forecast.ma.20, include = 0, xaxt = 'n', ylab = "Values")
+lines(test.stac, col = 2, lwd = 1)
+points(test.stac, col = "2", pch = 19)
+axis(1, at = seq(2022, 2024, by = 0.5), labels = c("Jan 2022", "Jun 2022", "Jan 2023", "Jun 2023", "Jan 2024"))
+
+
+```
+
+
+
+\newpage
+
+Możemy spróbować teraz odwrócić różnicowanie, aby zastosować modele AR(21) i MA(20) bezpośrednio na danych oryginalnych. Zastosujemy funkcję *diffinv* i najpierw odwrócimy różnicowanie z lagiem 2 (dodanie sezonowości), a potem z lagiem 1 (dodanie trendu). Prognoza zostanie wyrysowana tylko dla wartości średnich.
+
+```{r echo=FALSE, fig.height = 4, fig.width = 7, fig.align = 'center'}
+
+par(mar = c(4, 4, 0, 4))
+
+forecast_diff1_a <- diffinv(forecast.ar.21$mean, lag = 2)
+forecast_diff2_a <- diffinv(forecast_diff1_a, lag = 1)
+
+forecast_diff1_m <- diffinv(forecast.ma.20$mean, lag = 2)
+forecast_diff2_m <- diffinv(forecast_diff1_m, lag = 1)
+
+plot(forecast_diff2_a, col = "blue", xaxt = 'n', ylab = "Values", ylim = c(-35, 25))
+lines(forecast_diff2_m, col = 'darkgreen')
+lines(test, col = "2", lwd = 1, type ='o')
+points(test, col = "2", pch = 19)
+axis(1, at = seq(2022, 2024, by = 0.5), labels = c("Jan 2022", "Jun 2022", "Jan 2023", "Jun 2023", "Jan 2024"))
+legend("topright", legend=c("Prognoza AR(21)", "Prognoza MA(20)", "Rzeczywiste wartości zbioru testowego"), 
+       col=c("blue", "darkgreen", 2), lty=c(1, 1, 1), lwd=c(1, 1, 1), pch=c(NA, NA, 19))
+
+```
+
+
+Widzimy, że tak, jak niektóre początkowe wartości w miarę się zgadzają, to później zaczynają one zbyt szybko maleć w porównaniu do faktycznych wartości ze zbioru testowego. 
+
+Porównując wszystkie modele w kwestii danych oryginalnych można stwierdzić, że SARIMA poradziła sobie lepiej. Natomiast jeśli chodzi o dane stacjonarne, to AR(21) i MA(20) osiągnęły bardzo podobne wyniki.
+
+
+# 7. Podsumowanie
+
+W analizie szeregu czasowego skoncentrowaliśmy się na ocenie stacjonarności, przekształceniach danych, dopasowaniu modeli AR(p), MA(q), a także SARIMA. Po przeprowadzeniu diagnostyki wybieramy model ARIMA(2,1,1)(2,1,0)[2] jako najlepiej dopasowany do naszych danych.
+
+Model ten charakteryzuje się najniższymi wartościami kryteriów AIC, AICc i BIC, a reszty modelu spełniają założenia o losowości i normalności. Natomiast w  porównaniu miar błędu prognozy, model ARIMA(2,1,1)(2,1,0)[2] uzyskuje niższe wartości RMSE, MAE, MAPE i MASE, co świadczy o lepszej jakości prognoz. Co prawda przy ocenie długoterminowej prognozy widać pewne wyzwania związane z jej dokładnością. Mimo wszystko model skutecznie radzi sobie w pierwszych miesiącach, co może być korzystne w kontekście krótkoterminowej prognozy. 
+
+Warto jest jednak pamiętać, że ważne jest ciągłe sprawdzanie modelu, oraz zdolność dostosowywania go do zmieniających się warunków. To kluczowe, aby nasze prognozy były nadal skuteczne, zwłaszcza w obliczu nietypowych i nieprzewidywalnych zdarzeń.
