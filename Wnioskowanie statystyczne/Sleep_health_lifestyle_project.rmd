@@ -1,0 +1,535 @@
+---
+title: "| \\vspace{7cm} \\LARGE Wnioskowanie Statystyczne - Projekt zaliczeniowy
+  \n"
+author: "Alicja Kalwat, Łukasz Bielawski  \n Modelowanie Matematyczne i Analiza Danych,  \n Uniwersytet
+  Gdański"
+date: "30.01.2024r."
+output:
+  pdf_document:
+    latex_engine: pdflatex
+    keep_tex: true
+    dev: "cairo_pdf"
+---
+
+\newpage
+# Wstęp
+
+Do projektu użyjemy zestawu danych zdrowotnych zaczerpniętych z Kaggle'a 
+([Link do strony](https://www.kaggle.com/datasets/uom190346a/sleep-health-and-lifestyle-dataset?resource=download#)), 
+który obejmuje różnorodne aspekty życia codziennego osób. Poniżej przedstawiamy krótki opis poszczególnych zmiennych, które zostały zebrane, a które posłużą do dalszej analizy.
+
+\vspace{0.5cm}
+
+| Zmienna                 | Opis                                                        |
+|-------------------------|-------------------------------------------------------------|
+|<br>|<br>|
+| `Person.ID`               | Numer identyfikacyjny dla każdej osoby.                      |
+|<br>|<br>|
+| `Gender`                  | Płeć osoby (Male/Female).                                   |
+|<br>|<br>|
+| `Age`                     | Wiek osoby w latach.                                       |
+|<br>|<br>|
+| `Occupation`              | Zawód lub profesja osoby.                                   |
+|<br>|<br>|
+| `Sleep.Duration`          | Ilość godzin snu danej osoby dziennie.                      |
+|<br>|<br>|
+| `Quality.of.Sleep`        | Subiektywna ocena jakości snu, skala 1-10.                  |
+|<br>|<br>|
+| `Physical.Activity.Level` | Ilość minut aktywności fizycznej dziennie.                 |
+|<br>|<br>|
+| `Stress.Level`            | Subiektywna ocena poziomu stresu, skala 1-10.|
+|<br>|<br>|
+| `BMI.Category`            | Kategoria BMI osoby (Normal, Overweight, Obese).            |
+|<br>|<br>|
+| `Blood.Pressure`          | Ciśnienie krwi osoby (skurczowe/rozkurczowe).|
+|<br>|<br>|
+| `Heart.Rate`              | Puls osoby, wyrażona w uderzeniach na minutę.|
+|<br>|<br>|
+| `Daily.Steps`             | Ilość kroków, jakie osoba wykonuje dziennie.               |
+|<br>|<br>|
+| `Sleep.Disorder`          | Obecność lub brak zaburzeń snu (None, Insomnia, Sleep Apnea).|
+|<br>|<br>|
+
+\vspace{0.5cm}
+
+Celem projektu jest zidentyfikowanie zależności między różnymi zmiennymi zdrowotnymi, co pozwoli na lepsze zrozumienie wpływu różnych czynników na zdrowie i styl życia. Skupimy się analizie powyższych danych uwzględniając trzy hipotezy badawcze.
+
+\vspace{0.2cm}
+
+W dalszej części pracy skupimy się na zależności Ciśnienia Krwi oraz Jakości Snu od innych czynników zdrowotnych. Wydaje się, że obie z tych zmiennych mogą być determinowane przez różnorodne czynniki, takie jak wiek, BMI, ilość snu, czy poziom stresu.
+
+\vspace{0.2cm}
+
+Analiza ma na celu ustalenie, jakie zmienne mają istotny wpływ na zmienne zależne. Zajmiemy się więc wyżej opisanymi wstępnymi pomysłami, a finalne wnioski i głębsze rozważania pojawią się w trakcie dokładniejszego zbadania relacji między poszczególnymi czynnikami zdrowotnymi.
+
+# Przygotowanie danych oraz wstępna analiza
+
+```{r include=FALSE}
+library(broom)
+library(knitr)
+library(ggplot2)
+library(ggeffects)
+library(gt)
+library(corrplot)
+library(dplyr)
+
+```
+
+
+```{r include=FALSE}
+
+sleep <- read.csv("Sleep_health_and_lifestyle_dataset.csv") 
+
+sleep$Blood.Pressure <- as.numeric(sub("/.*", "", sleep$Blood.Pressure))
+
+sleep$BMI.Category <- ifelse(sleep$BMI.Category == 'Normal Weight', 'Normal', sleep$BMI.Category)
+sleep$BMI.Category <- ifelse(sleep$BMI.Category == 'Normal', 0, sleep$BMI.Category)
+sleep$BMI.Category <- ifelse(sleep$BMI.Category == 'Overweight', 1, sleep$BMI.Category)
+sleep$BMI.Category <- ifelse(sleep$BMI.Category == 'Obese', 2, sleep$BMI.Category)
+
+sleep$Gender <- as.factor(sleep$Gender)
+sleep$Occupation <- as.factor(sleep$Occupation)
+sleep$BMI.Category <- as.factor(as.numeric(sleep$BMI.Category))
+sleep$Sleep.Disorder <- as.factor(sleep$Sleep.Disorder)
+```
+
+
+
+Aby przystąpić do analizy, należy odpowiednio przygotować dane. 
+
+Kolumny, które są zmiennymi kategorycznymi (`Gender`,`Occupation`, `Sleep.Disorder`, a także `BMI.Category`) konwertujemy na faktory. 
+
+Kolejno zajmiemy się kolumną `Blood.Pressure`. Przydałoby się, aby miała ona wartości numeryczne, dlatego w dalszej analizie będziemy zajmować się tylko ciśnieniem skurczowym - zostawiamy tylko pierwsze wartości z dwóch wartości.
+
+W następnym kroku zmienimy wartości BMI na 0 - Normal, 1 - Overweight, oraz 2 - Obese, aby ułatwiło to nam dalszą pracę.
+
+
+
+
+```{r eval=FALSE, include=FALSE}
+gt(head(sleep))
+```
+
+\vspace{0.5cm}
+
+- **Korelacje zmiennych numerycznych**
+
+Jako, że część zmiennych w naszych danych jest zmiennymi numerycznymi, możemy za pomocą funkcji `cor()` wyliczyć dla nich korelacje, aby znaleźć między nimi jakieś zależności. Na poniższym wykresie przedstawiono wlaśnie owe wartości.
+
+\vspace{0.5cm}
+
+```{r echo=FALSE}
+
+numeric_columns <- sapply(sleep, is.numeric)
+sleep_numeric <- select(sleep[, numeric_columns], -Person.ID)
+
+
+cor_matrix <- cor(sleep_numeric)
+corrplot(cor_matrix, method = "color", type = "upper", order = "hclust", tl.col = "black", 
+         col = colorRampPalette(c("darkblue", "white", "darkred"))(100))
+
+
+```
+
+
+\newpage
+
+# Hipoteza 1: Ciśnienie Krwi zależy od Wieku oraz BMI
+
+Na wykresie korelacji widzimy, że istnieje znacząca korelacja między Ciśnieniem Krwi a Wiekiem. Dodatkowo, porównując średnie wartości Ciśnienia Krwi z BMI (tabela powyżej), także widać tutaj jakąś korelację. Natomiast nie widać, żeby była jakaś korelacja między BMI a Płcią. W przypadku budowy modeli lepsze rezultaty można osiągnąć, gdy zmienne niezależne są słabo lub niezbyt silnie skorelowane między sobą, więc jest to dla nas dobra wiadomość.
+
+\vspace{0.5cm}
+
+```{r echo= FALSE}
+sleep_BMI <- sleep %>%
+  group_by(BMI.Category) %>%
+  summarise(Blood.Pressure_mean = mean(Blood.Pressure), Age_mean = mean(Age))
+kable(sleep_BMI)
+
+```
+
+
+\vspace{0.5cm}
+
+Aby zbadać zależność Ciśnienia Krwi od Wieku i BMI stworzymy model regresji liniowej. W naszym modelu uwzględnimy wiek jako zmienną ciągłą oraz BMI jako zmienną kategoryczną. Poniżej przedstawiono wykres obrazujący zależność `Blood.Pressure` od `Age` oraz `BMI.Category`. Jak widać, dla każdej kategorii BMI im wyższy wiek, tym wyższe jest ciśnienie krwi. Podobną zależność możemy zaobserwować w przypadku kategorii BMI, dla 0 (Normal) mamy najniższe wartości, natomiast dla 1 (Obese) - najwyższe.
+
+\
+
+```{r echo=FALSE}
+# Stworzenie modelu regresji
+model <- lm(Blood.Pressure ~ Age+BMI.Category, data = sleep)
+
+# Wizualizacja efektów wpływu zmiennych niezależnych na ciśnienie krwi
+eff_data <- ggpredict(model, terms = c("Age", "BMI.Category"))
+
+plot_effects <- plot(eff_data) +
+  labs(x = "Wiek", y = "Ciśnienie Krwi") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, margin = margin(b = 20))) +
+  ggtitle("Efekty wpływu Wiek i BMI na Ciśnienie Krwi")
+
+print(plot_effects)
+```
+\newpage
+
+
+\begin{center}
+\textbf{Podsumowanie modelu Blood.Pressure $\sim$ Age + BMI.Category + Gender}
+\end{center}
+```{r echo=FALSE}
+
+tidy_results <- tidy(model)
+kable(tidy_results)
+#summary(model)
+```
+
+\vspace{0.5cm}
+
+Z podsumowania modelu powyżej możemy odczytać, że: 
+
+\vspace{0.3cm}
+
+- Współczynnik dla Wieku wynosi 0.30756, co oznacza, że każdy dodatkowy rok wieku przewiduje wzrost ciśnienia krwi o 0.30756 jednostki, przy założeniu stałej wartości BMI.
+
+- Współczynniki dla BMI.Category1 i BMI.Category2 (8.55251 i 15.73876) oznaczają, że osoby przynależące do tych kategorii mają średnio wyższe ciśnienie krwi w porównaniu do kategorii referencyjnej BMI.Category0 (przy założeniu stałej wartości wieku).
+
+
+\vspace{0.5cm}
+
+Statystyki t-testu dla współczynników (Estimate, Std. Error, t value, Pr(>|t|)) pozwalają stwierdzić, czy dany współczynnik jest statystycznie istotny. Wszystkie trzy współczynniki Age, BMI.Category1, BMI.Category2 mają bardzo małe wartości p-value, co sugeruje, że są one statystycznie istotne.
+
+\vspace{0.5cm}
+
+Podsumowując, model sugeruje, że wiek, kategoria BMI1 i kategoria BMI2 mają statystycznie istotny wpływ na przewidywane ciśnienie krwi, a model ogółem jest istotny statystycznie. Potwierdza to naszą hipotezę, więc możemy stwierdzić, że wiek i kategoria BMI mają wpływ na ciśnienie krwi. 
+
+\
+
+\newpage
+
+Podążając za pierwszą hipotezą, która zakładała, że Ciśnienie Krwi zależy od Wieku oraz BMI, postawiliśmy dodatkową hipotezę badawczą:
+
+# Hipoteza 1b: Ciśnienie Krwi zależy od Wieku oraz BMI, ale nie zależy od płci.
+
+Ciekawi nas, czy płeć może być zmienną towarzyszącą dla powyższego modelu.
+Podobnie, jak w przypadku pierwszej hipotezy, użyjemy modelu regresji liniowej, aby zbadać związki między Ciśnieniem Krwi, Wiekiem, BMI i Płcią. Wprowadzimy zmienną płci jako zmienną dodatkową do naszego modelu, aby sprawdzić, czy ma ona istotny wpływ na poziom ciśnienia krwi.
+
+\vspace{0.5cm}
+
+```{r echo=FALSE}
+
+# Stworzenie modelu regresji
+model2 <- lm(Blood.Pressure ~ Age+Gender+BMI.Category, data = sleep)
+
+# Wizualizacja efektów wpływu zmiennych niezależnych na ciśnienie krwi
+eff_data2 <- ggpredict(model2, terms = c("Age", "Gender", "BMI.Category"))
+
+plot_effects2 <- plot(eff_data2) +
+  labs(x = "Wiek", y = "Ciśnienie Krwi") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, margin = margin(b = 20))) +
+  ggtitle("Efekty wpływu Wiek, Płeć oraz BMI na Ciśnienie Krwi")
+
+print(plot_effects2)
+```
+
+\vspace{0.5cm}
+
+\begin{center}
+\textbf{Podsumowanie modelu Blood.Pressure $\sim$ Age + BMI.Category + Gender}
+\end{center}
+```{r echo=FALSE}
+
+tidy_results <- tidy(model2)
+kable(tidy_results)
+#summary(model2)
+```
+
+
+Analizując wyniki modelu regresji liniowej, w którym uwzględniono zmienne Age, Gender, BMI.Category jako predyktory dla zmiennej zależnej Blood.Pressure, możemy wyciągnąć następujące wnioski:
+
+Wpływ Wieku (Age):
+
+- Współczynnik dla GenderMale wynosi 3.5461. Oznacza to, że w porównaniu do płci żeńskiej, płci męskiej przypisuje się średnio wyższe ciśnienie krwi o 3.5461 jednostki, przy założeniu stałych wartości pozostałych zmiennych.
+
+Wyniki więc sugerują, że płci męskiej przypisuje się średnio wyższe ciśnienie krwi, biorąc pod uwagę wiek i kategorię BMI.
+Należy jednak pamiętać, że analiza statystyczna nie zawsze pozwala na jednoznaczne wnioski przyczynowo-skutkowe. Wpływ na wyniki analizy mogą mieć na przykład różnice w strukturze wiekowej między płciami. 
+
+
+Na poniższym wykresie pudełkowym możemy przyjrzeć się temu, jaki jest rozkład wieku dla kobiet i dla mężczyzn.
+Widać, że w naszym zbiorze danych duża część kobiet jest starsza niż mężczyźni.
+
+
+Jeśli wyniki wskazują, że kobiety mają niższe ciśnienie krwi, nawet pomimo przewagi starszych kobiet w badaniu, to może to potwierdzić fakt, że Płeć jest również istotną zmienną w kwestii modelowania Ciśnienia Krwi, więc nasza hipoteza 1b zostaje odrzucona.
+
+\
+
+```{r echo=FALSE}
+ggplot(sleep, aes(x = Gender, y = Age, fill = Gender)) +
+  geom_boxplot() +
+  labs(x = "Płeć",
+       y = "Wiek") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, margin = margin(b = 20))) +
+  ggtitle("Rozkład Wieku w Zależności od Płci")
+```
+
+
+\newpage
+
+# Hipoteza 2: Najlepszym modelem predyktującym zmienną Jakość snu jest model zależny od Poziomu stresu i Długości snu.
+
+\vspace{0.2cm}
+
+Analizując diagram korelacji zmiennych można zauważyć, że zmienna Jakości snu posiada parę istotnych korelacji z innymi zmiennymi, lecz najbardziej wyróżniają się korelacje z Poziomem stresu (ok. -0.90) oraz Długością Snu (ok. 0.88). Sugeruje to więc, aby stworzyć model, którego celem będzie opisywanie Jakości Snu za pomocą tych cech.
+
+\vspace{0.2cm}
+
+```{r echo = FALSE}
+
+wyniki1 = c()
+
+for (i in 1:100) {
+  
+  sample <- sample(c(TRUE,FALSE), nrow(sleep),
+                   replace=TRUE, prob=c(0.7,0.3)) 
+  
+  train_dataset  <- sleep[sample, ] 
+  test_dataset  <- sleep[!sample, ] 
+  
+  model_quality1 <- lm(Quality.of.Sleep ~ Stress.Level + Sleep.Duration, data = train_dataset)
+  
+  x = predict(model_quality1, newdata = test_dataset)
+  wyniki1 = c(wyniki1,sum(round(x,0)==test_dataset$Quality.of.Sleep)/nrow(test_dataset))
+  
+}
+
+średnia1 <- mean(wyniki1)
+```
+
+\vspace{0.2cm}
+
+\begin{center}
+\textbf{Podsumowanie modelu Quality.of.Sleep $\sim$ Sleep.Duration + Stress.Level}
+\end{center}
+```{r echo = FALSE}
+tidy_results <- tidy(model_quality1)
+kable(tidy_results)
+```
+
+Hipotezą jest, że jest to najlepszy model do przewidywania Jakości Snu. Dzielimy więc nasze dane na zbiór treningowy i testowy, uczymy model na zbiorze treningowym, a na koniec sprawdzamy jakość predykcji na zbiorze testowym. Po wielokrotnym sprawdzeniu tego modelu średni wynik prawidłowych wyników to ok. 83%. Żeby sprawdzić, czy jest to najlepszy model, musimy jednak rozważyć inne opcje i dokonać głębszej analizy.
+
+\vspace{0.2cm}
+
+Z diagramu korelacji widzimy, że poza korelacją Jakości Snu ze zmiennymi wyjaśniającymi - Długością snu i Poziomu stresu, istnieje też silna korelacja pomiędzy zmiennymi wyjaśniającymi (ok. -0.81). Podnosi to pytanie, czy aby na pewno obie zmienne są potrzebne w tym modelu, mimo że wyniki okazały się istotne statystycznie. Tworzymy więc model Jakość snu ~ Długość snu * Poziom stresu, aby uwzględnić też zależność pomiędzy zmiennymi wyjaśniającymi.
+
+\vspace{0.2cm}
+
+\begin{center}
+\textbf{Podsumowanie modelu Quality.of.Sleep $\sim$ Sleep.Duration * Stress.Level}
+\end{center}
+
+```{r echo = FALSE}
+modelSleepTimesStress <- lm(Quality.of.Sleep ~  Sleep.Duration * Stress.Level, sleep)
+tidy_results <- tidy(modelSleepTimesStress)
+kable(tidy_results)
+```
+
+Wyniki są intresujące, gdyż okazuję się, że zmienna z Poziomem stresu nie jest istotna dla tego modelu, ale zależność między zmiennymi wyjaśniającymi jest istotna. Czyli sam Poziom stresu nie pomaga nam znacząco w poprawieniu modelu, ale jego wartość w stosunku do długości snu już tak. Tworzymy więc model uwzględniający tylko te istotne zmienne i zależności.
+
+\vspace{0.2cm}
+
+```{r echo = FALSE}
+
+wyniki2 = c()
+
+for (i in 1:100) {
+  
+  sample <- sample(c(TRUE,FALSE), nrow(sleep),
+                   replace=TRUE, prob=c(0.7,0.3)) 
+  
+  train_dataset  <- sleep[sample, ] 
+  test_dataset  <- sleep[!sample, ] 
+  
+  model_quality2 <- lm(Quality.of.Sleep ~ Sleep.Duration + Sleep.Duration:Stress.Level, data = train_dataset)
+  
+  x = predict(model_quality2, newdata = test_dataset)
+  wyniki2 = c(wyniki2,sum(round(x,0)==test_dataset$Quality.of.Sleep)/nrow(test_dataset))
+  
+}
+
+a <- t.test(wyniki2, wyniki1, alternative = "greater")
+średnia2 <- mean(wyniki2)
+```
+
+Wyniki predykcji dla tego modelu są lepsze (ok. 86.6%). Upewniamy się też t.testem, że średni wynik poprawnych predykcji jest znacząco wyższy niż dla pierwszego modelu. Obala to naszą wstępną hipotezę, jednak spróbujmy zrobić jeszcze lepszy model, dodając zmienną towarzyszącą.
+
+\vspace{0.2cm}
+
+Patrząc na diagram korelacji, pozostałe zmienne albo nie mają istotnej korelacji z Jakością snu, albo mają ją również ze zmienną Długości snu. W naszych danych mamy też jednak zmienne kategoryczne, które mogą mieć istotny wpływ. Popatrzmy na średnią jakość snu w zależności od kategorii BMI.
+
+\vspace{0.2cm}
+```{r echo= FALSE}
+sleep_BMI <- sleep %>%
+  group_by(BMI.Category) %>%
+  summarise(Średnia_Jakość_snu = mean(Quality.of.Sleep), Średni_poziom_stresu = mean(Stress.Level), Śrdnia_długość_snu = mean(Sleep.Duration))
+kable(sleep_BMI)
+
+```
+
+Widzimy że jakość snu dosyć znacząco różni się w zależności od grupy BMI. W tym samym czasie, Poziom stresu i Długość snu wydaje się niezbyt zależna od kategorii. Wydaje się więc to dobry kandydat na zmienną towarzyszącą w naszym modelu.
+
+\vspace{0.3cm}
+
+\begin{center}
+\textbf{Podsumowanie modelu Quality.of.Sleep $\sim$ Sleep.Duration + Sleep.Duration:Stress.Level + BMI.Category}
+\end{center}
+
+```{r echo= FALSE}
+wyniki3 = c()
+sleep$BMI.Category <- as.numeric(sleep$BMI.Category)
+for (i in 1:100) {
+  
+  sample <- sample(c(TRUE,FALSE), nrow(sleep),
+                   replace=TRUE, prob=c(0.7,0.3)) 
+  
+  train_dataset  <- sleep[sample, ] 
+  test_dataset  <- sleep[!sample, ] 
+  
+  model_quality3 <- lm(Quality.of.Sleep ~ Sleep.Duration + Sleep.Duration:Stress.Level + BMI.Category, data = train_dataset)
+  
+  x = predict(model_quality3, newdata = test_dataset)
+  wyniki3 = c(wyniki3,sum(round(x,0)==test_dataset$Quality.of.Sleep)/nrow(test_dataset))
+  
+}
+tidy_results <- tidy(model_quality3)
+kable(tidy_results)
+#summary(model_quality3)
+test <- t.test(wyniki3, wyniki2, alternative = "greater")
+średnia3 <- mean(wyniki3)
+
+```
+Ponownie wyniki predykcji znacząco się poprawiły (ok. 91%), a t.test potwierdza istotność tej różnicy w stosunku do poprzedniego modelu. Wszystkie współczynniki są istotne, więc wydaje się to być najlepszy z dotychczasowych modeli, co ostatecznie obala hipotezę - sytuacja była bardziej skomplikowana niż się wydawało i był potrzebny bardziej skomplikowany model. 
+
+\vspace{0.3cm}
+
+\begin{center}
+\textbf{Porównanie dokładności wszystkich modeli}
+\end{center}
+```{r echo  = FALSE}
+wyniki <- c(średnia1, średnia2, średnia3)
+nazwa_model <- c("Jakość ~ Długość snu + Poziom Stresu", "Jakość ~ Długość snu + Długość snu:Poziom Stresu", "Jakość ~ Długość snu + Długość snu:Poziom Stresu + Kategoria BMI")
+
+tabela <- data.frame(Model = nazwa_model, Dokładność = wyniki)
+kable(tabela)
+```
+Należy jednak pamiętać, że nie świadczy to jeszcze o bezpośrednim wpływie zmiennej BMI na Jakość snu. Aby to sprawdzić, trezba dokonać dogłębniejszej analizy
+.
+\vspace{0.3cm}
+
+# Hipoteza 3: Zmienna Kategoria BMI bezpośrednio wpływa na jakość snu.
+
+\vspace{0.3cm}
+
+Zauważyliśmy już, że zachodzi korelacja między kategorią BMI a jakością snu. Istnieje jednak przypuszczenie, że nie zależy to bezpośrednio od tej zmiennej, a od innej zmiennej, korelującej z nią. Na przykład wydaje się, że na Jakość snu powinny wpływać zaburzenia senne takie jak insomnia i bezdech senny. Możliwe, że BMI ma istotny wpływ na występowanie tych zaburzeń, przez co pośrednio wpływa na Jakość snu, ale nie bezpośrednio. Na początku sprawdźmy, czy rzeczywiście posiadanie zaburzenia wpływa istotnie Jakość snu, do czego wykorzystamy model ANOVA.
+
+
+```{r echo=FALSE, warning=FALSE, fig.height=4}
+ggplot(sleep, aes(x = Sleep.Disorder, y = Quality.of.Sleep, fill = Sleep.Disorder)) +
+  geom_boxplot() +
+  labs(x = "Zaburzenia senne",
+       y = "Jakość snu (0-10)") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, margin = margin(b = 20))) +
+  ggtitle("Jakość snu w zależności od zaburzeń sennych")+
+  guides(fill = FALSE)
+
+modelANOVA1 <- aov(Quality.of.Sleep~Sleep.Disorder, data = sleep)
+
+
+```
+\vspace{0.5cm}
+
+\begin{center}
+\textbf{Podsumowanie modelu ANOVA Quality.of.Sleep $\sim$ Sleep.Disorder}
+\end{center}
+
+```{r echo = FALSE}
+tidy_results <- tidy(modelANOVA1)
+kable(tidy_results)
+```
+
+
+Widzimy istotny wpływ zaburzeń sennych na jakość snu, co nie jest zaskoczeniem. Chcemy teraz sprawdzić, czy BMI wpływa na jakość snu poprzez korelacje z zaburzeniami, czy jest istotne niezależnie od nich. Stworzymy więc model ANOVA, w którym głównym efektem będzie zaburzenie, a BMI będzie efektem interakcji.
+
+\vspace{0.5cm}
+
+\begin{center}
+\text{Podsumowanie modelu ANOVA Quality.of.Sleep $\sim$} Sleep.Disorder*BMI.Category
+\end{center}
+
+```{r echo=FALSE}
+sleep$BMI.Category <- as.factor(sleep$BMI.Category)
+modelANOVA2 <- aov(Quality.of.Sleep~Sleep.Disorder*BMI.Category, data = sleep)
+tidy_results <- tidy(modelANOVA2)
+kable(tidy_results)
+```
+\newpage
+
+Widzimy, że p-value dla kategorii BMI jest istotne statystycznie w tym modelu. Oznacza to, że niezależnie czy dana osoba ma zaburzenie senne czy nie, BMI jest istotne i wpływa na jakość snu. Biorąc na przykład grupę zdrowych osób, wśród nich można zauważyć pogorszenie jakości snu przy większym BMI.
+
+\vspace{0.5cm}
+
+Istnieje też jednak druga wątpliwość, że kluczowy dla jakości snu jest wiek. Im osoba starsza tym gorszej jakości może mieć sen, a przy okazji ma też większe BMI, co nieprawidłowo sugeruje, że BMI przyczynia się gorszej jakości snu. Sprawdźmy, czy wiek wpływa na jakość snu i czy istnieje korelacja między wiekiem i BMI.
+
+
+\vspace{0.2cm}
+```{r echo = FALSE, warning=FALSE}
+ggplot(sleep, aes(x = BMI.Category, y = Age, fill = BMI.Category)) +
+  geom_boxplot() +
+  labs(x = "BMI (1 - Normal, 2 - Overweight, 3 - Obese)",
+       y = "Wiek") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, margin = margin(b = 20))) +
+  ggtitle("Wiek w zależności od BMI")+
+  guides(fill = FALSE)
+
+```
+\vspace{0.4cm}
+
+
+\begin{center}
+\textbf{Podsumowanie modelu ANOVA Age $\sim$ BMI.Category}
+\end{center}
+```{r echo=FALSE}
+modelANOVA3<- aov(Age~BMI.Category, data = sleep)
+tidy_results <- tidy(modelANOVA3)
+kable(tidy_results)
+```
+\vspace{0.3cm}
+
+\newpage
+
+\begin{center}
+\textbf{Podsumowanie modelu Quality.of.Sleep $\sim$ Age}
+\end{center}
+```{r echo=FALSE}
+model <- lm(Quality.of.Sleep~Age, data = sleep)
+tidy_results <- tidy(model)
+kable(tidy_results)
+```
+
+Można wyciągnąć wnioski, że istnieje zarówno korelacja między wiekiem a kategorią BMI, jak i między wiekiem i jakością snu, więc nasze podejrzenia się potwierdzają. Trzeba więc ponownie sprawdzić, czy wpływ BMI na Jakość snu jest niezależny od drugiej zmiennej. Wykonujemy podobny model ANOVA.
+
+\vspace{0.5cm}
+
+\begin{center}
+\textbf{Podsumowanie modelu ANOVA Quality.of.Sleep $\sim$ Age*BMI.Category}
+\end{center}
+
+```{r echo = FALSE}
+modelANOVA4 <- aov(Quality.of.Sleep~Age*BMI.Category, data = sleep)
+tidy_results <- tidy(modelANOVA4)
+kable(tidy_results)
+```
+
+Również tutaj p-value dla kategorii BMI jest nieduże, więc BMI ma istotny wpływ na jakość snu niezależnie od wieku. Mimo wątpliwości nie byliśmy więc w stanie obalić naszej hipotezy, BMI jest istotnym czynnikiem i niezależnie od innych czynników wpływa na jakość snu. Na podstawie tych danych więc potwierdzamy tę hipotezę.
