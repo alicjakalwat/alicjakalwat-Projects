@@ -1,0 +1,7 @@
+In this paper we try to find the best possible way to forecast inflation in the United States
+using only econometric methods - namely SARIMA models. We use monthly data from
+1978 to 2025 divided into two parts: the first 80% of observations are in-sample, used to
+calibrate model and find the right parameters, and the rest 20% is used to check forecasts.
+We use rolling-window approach with two SARIMA models given by BIC and AIC. They
+both perform significantly better than the benchmarks - RandomWalk and Seasonal Random
+Walk, reducing the Root Mean Squared Forecast Error by 21% compared to Random Walk.
