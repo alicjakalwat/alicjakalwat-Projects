@@ -1,7 +1,6 @@
-The primary goal of this project is to develop an NLP-based framework for analyzing and identifying the main thematic topics in published research articles. 
+The primary goal of this project was to develop an NLP-based framework for analyzing and identifying the main thematic topics in published research articles. 
 
-Using Ecology Letters as an example, we will apply topic modeling and classification techniques to see what are the dominant research themes present in article abstracts,
-examine how these themes evolve over a selected period, but also calculate the alignment between those abstracts and the journal's aims & scope.
+Using Ecology Letters as an example, I applied topic modeling and classification techniques to see what are the dominant research themes present in article abstracts, examine how these themes evolve over a selected period, but also calculate the alignment between those abstracts and the journal's aims & scope.
 
 The code is divided into 4 sections:
 - data preparatation
