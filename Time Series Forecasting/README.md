@@ -1,6 +1,4 @@
-Forecasting U.S. Inflation – Managing Seasonal Patterns 
-
-In this paper we try to find the best possible way to forecast inflation in the United States
+Forecasting U.S. Inflation: Managing Seasonal Patterns - In this paper we try to find the best possible way to forecast inflation in the United States
 using only econometric methods - the SARIMA models. 
 
 We use monthly data from
